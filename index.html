@@ -899,5 +899,422 @@
             // 在实际应用中，这里会调用支付接口
         });
     </script>
+    // 修改原HTML文件中的<script>部分
+<script>
+    let currentQuestion = 0;
+    let answers = [];
+    let questions = [];
+    let testId = null;
+
+    // 页面加载时获取题目
+    document.addEventListener('DOMContentLoaded', async function() {
+        await loadQuestions();
+        displayCurrentQuestion();
+    });
+
+    // 加载测试题目
+    async function loadQuestions() {
+        try {
+            const response = await fetch('/api/questions');
+            const data = await response.json();
+            questions = data.questions;
+        } catch (error) {
+            console.error('加载题目失败:', error);
+            // 使用默认题目作为fallback
+            questions = getDefaultQuestions();
+        }
+    }
+
+    // 显示当前题目
+    function displayCurrentQuestion() {
+        if (currentQuestion >= questions.length) {
+            submitTest();
+            return;
+        }
+
+        const question = questions[currentQuestion];
+        
+        // 更新进度
+        const progress = ((currentQuestion + 1) / questions.length) * 100;
+        document.querySelector('.progress-fill').style.width = progress + '%';
+        document.querySelector('.question-count').textContent = 
+            `问题 ${currentQuestion + 1}/${questions.length}`;
+        document.querySelector('.progress-text span:last-child').textContent = 
+            Math.round(progress) + '%';
+        
+        // 更新题目内容
+        document.querySelector('.question-text').textContent = question.question_text;
+        
+        // 更新选项
+        const optionsContainer = document.querySelector('.options-container');
+        optionsContainer.innerHTML = '';
+        
+        question.options.forEach((option, index) => {
+            const optionDiv = document.createElement('div');
+            optionDiv.className = 'option';
+            optionDiv.innerHTML = `
+                <div class="option-emoji">${option.emoji}</div>
+                <div class="option-text">${option.text}</div>
+            `;
+            optionDiv.addEventListener('click', () => selectOption(index));
+            optionsContainer.appendChild(optionDiv);
+        });
+    }
+
+    // 选择选项
+    function selectOption(optionIndex) {
+        // 移除所有选中状态
+        document.querySelectorAll('.option').forEach(opt => {
+            opt.classList.remove('selected');
+        });
+        
+        // 添加当前选项的选中状态
+        document.querySelectorAll('.option')[optionIndex].classList.add('selected');
+        
+        // 保存答案
+        answers[currentQuestion] = optionIndex;
+        
+        // 1秒后自动跳转到下一题
+        setTimeout(() => {
+            currentQuestion++;
+            displayCurrentQuestion();
+        }, 1000);
+    }
+
+    // 提交测试
+    async function submitTest() {
+        try {
+            // 显示加载状态
+            document.querySelector('.test-content').innerHTML = `
+                <div style="text-align: center; padding: 40px;">
+                    <i class="fas fa-spinner fa-spin" style="font-size: 2rem; color: var(--primary);"></i>
+                    <p style="margin-top: 20px;">正在分析您的答案...</p>
+                </div>
+            `;
+
+            const response = await fetch('/api/submit-test', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    answers: answers,
+                    userInfo: null // 匿名测试
+                })
+            });
+
+            const data = await response.json();
+            testId = data.testId;
+            
+            // 显示基础报告
+            displayBasicReport(data.result);
+            
+        } catch (error) {
+            console.error('提交失败:', error);
+            alert('提交失败，请重试');
+        }
+    }
+
+    // 显示基础报告
+    function displayBasicReport(result) {
+        // 滚动到报告区域
+        document.querySelector('.report-section').scrollIntoView({ 
+            behavior: 'smooth' 
+        });
+        
+        // 更新伴侣类型
+        document.querySelector('.partner-title').innerHTML = 
+            `您的理想伴侣：<span style="color: #8b5cf6;">${result.partnerType.type}</span>`;
+        document.querySelector('.partner-subtitle').textContent = 
+            result.partnerType.description;
+        document.querySelector('.partner-avatar').textContent = 
+            result.partnerType.emoji;
+        
+        // 更新可见的分数
+        const scoreElements = document.querySelectorAll('.trait-card:not(.locked) .trait-score');
+        scoreElements[0].textContent = result.basicScore.emotional_support + '%';
+        scoreElements[1].textContent = result.basicScore.communication_depth + '%';
+    }
+
+    // 解锁完整报告
+    async function unlockFullReport() {
+        try {
+            const response = await fetch('/api/payment/create', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    testId: testId,
+                    amount: 4500 // 45元
+                })
+            });
+
+            const data = await response.json();
+            
+            // 跳转到支付页面
+            window.open(data.paymentUrl, '_blank');
+            
+            // 监听支付结果（简化版本）
+            checkPaymentStatus(data.orderId);
+            
+        } catch (error) {
+            console.error('创建订单失败:', error);
+            alert('创建订单失败，请重试');
+        }
+    }
+
+    // 检查支付状态
+    async function checkPaymentStatus(orderId) {
+        // 简化版本：直接显示完整报告
+        // 实际应用中需要轮询支付状态
+        setTimeout(async () => {
+            try {
+                const response = await fetch(`/api/report/${testId}?paid=true`);
+                const data = await response.json();
+                displayFullReport(data.report);
+            } catch (error) {
+                console.error('获取完整报告失败:', error);
+            }
+        }, 3000);
+    }
+
+    // 显示完整报告
+    function displayFullReport(report) {
+        // 移除模糊效果和锁定图标
+        document.querySelectorAll('.trait-card.locked').forEach(card => {
+            card.classList.remove('locked');
+            const lockIcon = card.querySelector('.lock-icon');
+            if (lockIcon) lockIcon.remove();
+        });
+        
+        // 更新所有维度分数
+        const allScores = document.querySelectorAll('.trait-score');
+        const dimensions = ['emotional_support', 'value_alignment', 'communication_depth', 'intimacy_needs'];
+        
+        allScores.forEach((scoreEl, index) => {
+            if (report.fullDimensions && report.fullDimensions[dimensions[index]]) {
+                scoreEl.textContent = report.fullDimensions[dimensions[index]] + '%';
+            }
+        });
+        
+        // 更新关系时间线
+        const timelineContainer = document.querySelector('.relationship-timeline');
+        timelineContainer.innerHTML = '<h3 class="section-heading">关系发展预测</h3>';
+        
+        report.timeline.forEach(item => {
+            const timelineItem = document.createElement('div');
+            timelineItem.className = 'timeline-item';
+            timelineItem.innerHTML = `
+                <div class="timeline-year">${item.period}</div>
+                <div class="timeline-risk risk-${item.riskLevel}">
+                    冲突概率：${item.risk}
+                    ${item.reason ? `<br><small>${item.reason}</small>` : ''}
+                </div>
+            `;
+            timelineContainer.appendChild(timelineItem);
+        });
+        
+        // 隐藏付费墙
+        document.querySelector('.pay-wall').style.display = 'none';
+        
+        alert('完整报告已解锁！');
+    }
+
+    // 默认题目（当API不可用时使用）
+    function getDefaultQuestions() {
+        return [
+            {
+                question_text: "当伴侣和异性同事加班到深夜，你会：",
+                options: [
+                    { emoji: "😠", text: "立刻询问细节" },
+                    { emoji: "😌", text: "等对方主动解释" },
+                    { emoji: "😨", text: "计划查手机" },
+                    { emoji: "😐", text: "完全不在意" }
+                ]
+            },
+            {
+                question_text: "在重要决定上，你更希望伴侣：",
+                options: [
+                    { emoji: "🤝", text: "和我一起商量" },
+                    { emoji: "👑", text: "尊重我的决定" },
+                    { emoji: "🎯", text: "提供专业建议" },
+                    { emoji: "🤷", text: "让我自己决定" }
+                ]
+            }
+            // 添加更多题目...
+        ];
+    }
+
+    // 绑定解锁按钮事件
+    document.querySelector('.pay-card .btn').addEventListener('click', function(e) {
+        e.preventDefault();
+        unlockFullReport();
+    });
+</script>
+    // scripts/init-database.js
+import { MongoClient } from 'mongodb';
+
+const uri = process.env.MONGODB_URI;
+
+async function initDatabase() {
+    const client = new MongoClient(uri);
+    
+    try {
+        await client.connect();
+        const db = client.db('compatibility');
+        
+        // 初始化题目数据
+        const questions = [
+            {
+                order_num: 1,
+                question_text: "当伴侣和异性同事加班到深夜，你会：",
+                options: [
+                    { emoji: "😠", text: "立刻询问细节" },
+                    { emoji: "😌", text: "等对方主动解释" },
+                    { emoji: "😨", text: "计划查手机" },
+                    { emoji: "😐", text: "完全不在意" }
+                ],
+                category: "trust",
+                scoring: {
+                    0: { emotional_support: -10, trust_level: -15 },
+                    1: { emotional_support: 15, trust_level: 10 },
+                    2: { emotional_support: -20, trust_level: -25 },
+                    3: { emotional_support: 5, trust_level: 5 }
+                }
+            },
+            {
+                order_num: 2,
+                question_text: "在重要决定上，你更希望伴侣：",
+                options: [
+                    { emoji: "🤝", text: "和我一起商量" },
+                    { emoji: "👑", text: "尊重我的决定" },
+                    { emoji: "🎯", text: "提供专业建议" },
+                    { emoji: "🤷", text: "让我自己决定" }
+                ],
+                category: "communication",
+                scoring: {
+                    0: { communication_depth: 20, value_alignment: 15 },
+                    1: { communication_depth: 10, value_alignment: 5 },
+                    2: { communication_depth: 15, value_alignment: 10 },
+                    3: { communication_depth: -5, value_alignment: -10 }
+                }
+            },
+            {
+                order_num: 3,
+                question_text: "当你情绪低落时，最希望伴侣：",
+                options: [
+                    { emoji: "🤗", text: "给我一个拥抱" },
+                    { emoji: "💬", text: "听我倾诉" },
+                    { emoji: "💡", text: "帮我分析原因" },
+                    { emoji: "🎵", text: "陪我做喜欢的事" }
+                ],
+                category: "emotional_support",
+                scoring: {
+                    0: { emotional_support: 15, intimacy_needs: 20 },
+                    1: { emotional_support: 25, communication_depth: 15 },
+                    2: { emotional_support: 10, communication_depth: 20 },
+                    3: { emotional_support: 12, intimacy_needs: 10 }
+                }
+            },
+            {
+                order_num: 4,
+                question_text: "理想的约会方式是：",
+                options: [
+                    { emoji: "🍽️", text: "浪漫晚餐" },
+                    { emoji: "🎬", text: "看电影聊天" },
+                    { emoji: "🏃", text: "户外运动" },
+                    { emoji: "🏠", text: "在家相处" }
+                ],
+                category: "lifestyle",
+                scoring: {
+                    0: { intimacy_needs: 18, value_alignment: 10 },
+                    1: { communication_depth: 15, intimacy_needs: 12 },
+                    2: { value_alignment: 15, emotional_support: 8 },
+                    3: { intimacy_needs: 20, emotional_support: 15 }
+                }
+            },
+            {
+                order_num: 5,
+                question_text: "对于伴侣的社交活动，你的态度是：",
+                options: [
+                    { emoji: "👥", text: "希望一起参与" },
+                    { emoji: "🤝", text: "支持但不强求参与" },
+                    { emoji: "📱", text: "保持了解即可" },
+                    { emoji: "🆓", text: "完全自由" }
+                ],
+                category: "independence",
+                scoring: {
+                    0: { intimacy_needs: 15, emotional_support: 10 },
+                    1: { emotional_support: 20, value_alignment: 15 },
+                    2: { value_alignment: 10, communication_depth: 5 },
+                    3: { value_alignment: 5, emotional_support: -5 }
+                }
+            },
+            {
+                order_num: 6,
+                question_text: "发生争吵后，你通常会：",
+                options: [
+                    { emoji: "💬", text: "立即沟通解决" },
+                    { emoji: "⏰", text: "冷静后再谈" },
+                    { emoji: "🤝", text: "先道歉再解释" },
+                    { emoji: "🤐", text: "等对方先开口" }
+                ],
+                category: "conflict_resolution",
+                scoring: {
+                    0: { communication_depth: 25, emotional_support: 15 },
+                    1: { emotional_support: 20, communication_depth: 18 },
+                    2: { emotional_support: 15, intimacy_needs: 12 },
+                    3: { communication_depth: -10, emotional_support: -5 }
+                }
+            },
+            {
+                order_num: 7,
+                question_text: "关于未来规划，你认为：",
+                options: [
+                    { emoji: "🎯", text: "需要详细计划" },
+                    { emoji: "🗺️", text: "有大方向即可" },
+                    { emoji: "🎲", text: "顺其自然发展" },
+                    { emoji: "💭", text: "各自规划为主" }
+                ],
+                category: "future_planning",
+                scoring: {
+                    0: { value_alignment: 25, communication_depth: 15 },
+                    1: { value_alignment: 20, emotional_support: 10 },
+                    2: { value_alignment: 5, emotional_support: 15 },
+                    3: { value_alignment: -15, intimacy_needs: -10 }
+                }
+            },
+            {
+                order_num: 8,
+                question_text: "在金钱管理上，你希望：",
+                options: [
+                    { emoji: "💰", text: "共同管理所有收入" },
+                    { emoji: "🏦", text: "重要支出共同决定" },
+                    { emoji: "💳", text: "各自管理各自花销" },
+                    { emoji: "📊", text: "一人主要负责理财" }
+                ],
+                category: "financial_values",
+                scoring: {
+                    0: { value_alignment: 20, intimacy_needs: 18 },
+                    1: { value_alignment: 25, communication_depth: 15 },
+                    2: { value_alignment: 10, intimacy_needs: 5 },
+                    3: { value_alignment: 15, communication_depth: 8 }
+                }
+            },
+            {
+                order_num: 9,
+                question_text: "表达爱意的方式，你更倾向于：",
+                options: [
+                    { emoji: "💌", text: "言语表达" },
+                    { emoji: "🎁", text: "礼物惊喜" },
+                    { emoji: "🤗", text: "身体接触" },
+                    { emoji: "🛠️", text: "实际行动" }
+                ],
+                category: "love_language",
+                scoring: {
+                    0: { communication_depth: 25, emotional_support: 20 },
+                    1: { intimacy_needs: 20, emotional_support: 15 },
+                    2:
 </body>
 </html>
